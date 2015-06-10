@@ -94,3 +94,13 @@ indexes:
   properties:
   - name: topics
   - name: name
+
+- kind: ConferenceSession
+  properties:
+  - name: conference
+  - name: typeOfSession
+
+- kind: ConferenceSession
+  properties:
+  - name: conference
+  - name: duration

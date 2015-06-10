@@ -16,6 +16,7 @@ import httplib
 import endpoints
 from protorpc import messages
 from google.appengine.ext import ndb
+from google.appengine.api import memcache
 
 class ConflictException(endpoints.ServiceException):
     """ConflictException -- exception mapped to HTTP 409 response"""
@@ -27,6 +28,7 @@ class Profile(ndb.Model):
     mainEmail = ndb.StringProperty()
     teeShirtSize = ndb.StringProperty(default='NOT_SPECIFIED')
     conferenceKeysToAttend = ndb.StringProperty(repeated=True)
+    wishListSessions = ndb.KeyProperty(repeated=True)
 
 class ProfileMiniForm(messages.Message):
     """ProfileMiniForm -- update Profile form message"""
@@ -108,3 +110,41 @@ class ConferenceQueryForms(messages.Message):
     """ConferenceQueryForms -- multiple ConferenceQueryForm inbound form message"""
     filters = messages.MessageField(ConferenceQueryForm, 1, repeated=True)
 
+### My classes ##########################
+### Session ###
+class ConferenceSession(ndb.Model):
+    """ConferenceSession -- A NDB datastore object for conference sessions"""
+    name = ndb.StringProperty(required=True)
+    highlights = ndb.StringProperty()
+    speaker = ndb.StringProperty()
+    duration = ndb.FloatProperty()
+    typeOfSession = ndb.StringProperty()
+    date = ndb.DateProperty()
+    startTime = ndb.TimeProperty()
+    conference = ndb.KeyProperty(kind=Conference)
+
+class SessionForm(messages.Message):
+    """SessionForm -- API Session object"""
+    name = messages.StringField(1, required=True)
+    highlights = messages.StringField(2)
+    speaker = messages.StringField(3, required=True)
+    duration = messages.FloatField(4, required=True)
+    typeOfSession = messages.StringField(5, required=True)
+    date = messages.StringField(6, required=True)
+    startTime = messages.StringField(7, required=True)
+    #conference = messages.StringField(8, required=True)
+
+class SessionForms(messages.Message):
+    """SessionForms -- A container for multiple SessionForms"""
+    items = messages.MessageField(SessionForm, 1, repeated=True)
+
+### Wishlist ###
+class WishListForm(messages.Message):
+    """WishListForm -- API Session object for wishlist"""
+    SessionKey = messages.StringField(1)
+    User = messages.StringField(2)
+
+### OTHER ###
+class FeaturedSpeaker(messages.Message):
+    """FeaturedSpeaker -- just a container for a string of the speaker"""
+    FeaturedSpeaker = messages.StringField(1)
