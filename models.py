@@ -121,7 +121,7 @@ class ConferenceSession(ndb.Model):
     typeOfSession = ndb.StringProperty()
     date = ndb.DateProperty()
     startTime = ndb.TimeProperty()
-    conference = ndb.KeyProperty(kind=Conference)
+    confWebsafeKey = ndb.KeyProperty(kind=Conference)
 
 class SessionForm(messages.Message):
     """SessionForm -- API Session object"""
@@ -132,7 +132,7 @@ class SessionForm(messages.Message):
     typeOfSession = messages.StringField(5, required=True)
     date = messages.StringField(6, required=True)
     startTime = messages.StringField(7, required=True)
-    #conference = messages.StringField(8, required=True)
+    confWebsafeKey = messages.StringField(8, required=True)
 
 class SessionForms(messages.Message):
     """SessionForms -- A container for multiple SessionForms"""

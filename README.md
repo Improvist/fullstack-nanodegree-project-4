@@ -4,6 +4,8 @@ Task 1 Explanation:
 	yet in place for what to do with sessons, their relationships is kept loose. For similar reasons, speakers 
 	are kept as simple strings, for simplicity. As far as I'm aware, Google DataStore uses Memcache by default
 	where it deems necessary, so manually enabling it for Sessions is lost on me.
+	I use the Float property for duration so we can simply and easily represent all times based on a decimal 
+	format, instead of using a "messy" Time property. 
 
 Task 3 Explanation:
 	NEW QUERIES:
@@ -13,10 +15,12 @@ Task 3 Explanation:
 	in the past. There is similar functionality already in place (GetConferencesToAttend) but this ONLY grabs past
 	conferences. The advantage of this is viewing a quick historical display of conferences for a user.
 	QUERY PROBLEM:
-	The only "problem" I see with this query is that it requires two filters at once. This isn't too difficult to
-	implement with existing functionality, though. Example query:
-		sessions = ConferenceSession.query(ndb.AND(ConferenceSession.typeOfSession != "workshop", 
-												   ConferenceSession.startTime.hour < 19.0))
+	The problem with this is that if you have a not-equals comparison, you cannot have any other property
+	filters. The simplest way around this would be to add a field to the entity that is an amalgamation of 
+	"startTime" and "sessionType" - basically it is a boolean field that says "true/false" if a case meets
+	these criteria. This is a more-and-more common tradeoff of space for performance that is characterizing
+	the modern data storage. Alternatively, you could write two separate queries (one for starttime after 7
+	and one for typeofsession != workshop) and then use Python to find matches between them.
 
 ##### INCLUDED SETUP INFORMATION ######
 App Engine application for the Udacity training course.

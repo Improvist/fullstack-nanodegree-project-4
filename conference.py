@@ -73,7 +73,7 @@ SESSION_DEFAULTS = {
     "typeOfSession": "None",
     "date": "1990-01-01",
     "startTime": "23:59",
-    "conference": "None"
+    "confWebsafeKey": "None"
 }
 
 OPERATORS = {
@@ -204,7 +204,7 @@ class ConferenceApi(remote.Service):
         )
 
     #Handwritten
-    @endpoints.method(SessionForm, SessionForm,
+    @endpoints.method(SESS_POST_REQUEST, SessionForm,
             path='conference/{websafeConferenceKey}/sessions',
             http_method='PUT', name='createSession')
     def createSession(self, request):
@@ -233,17 +233,20 @@ class ConferenceApi(remote.Service):
 
         # convert dates from strings to Date objects; set month based on start_date
         if data['startTime']:
-            data['startTime'] = datetime.strptime(data['startDate'], "%H:%M").time()
+            data['startTime'] = datetime.strptime(data['startTime'], "%H:%M").time()
         if data['date']:
             data['date'] = datetime.strptime(data['date'][:10], "%Y-%m-%d").date()
+
+        c_key = ndb.Key(ConferenceSession, request.websafeConferenceKey)
+        s_id = ConferenceSession.allocate_ids(size=1, parent=c_key)[0]
+        s_key = ndb.Key(ConferenceSession, s_id, parent=c_key)
+        data['key'] = s_key
 
         # create Conference
         ConferenceSession(**data).put()
 
-        # Check if speaker already exists (Task 4)
-        data['speaker']
-        sessions = ConferenceSession.query(ndb.AND(ConferenceSession.websafeConferenceKey == data['websafeConferenceKey'], ConferenceSession.speaker == data['speaker']));
         # If we have more than 1 instance of this speaker, we add it to Memcache
+        sessions = ConferenceSession.query(ndb.AND(ConferenceSession.confWebsafeKey == request.websafeConferenceKey, ConferenceSession.speaker == data['speaker']));
         if(sessions.count() > 1):
             featured_speakers = '%s %s %s' % (
                 'The featured speaker ',
