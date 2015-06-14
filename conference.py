@@ -73,7 +73,7 @@ SESSION_DEFAULTS = {
     "typeOfSession": "None",
     "date": "1990-01-01",
     "startTime": "23:59",
-    "confWebsafeKey": "None"
+    "webConfKey": "None"
 }
 
 OPERATORS = {
@@ -105,9 +105,19 @@ CONF_POST_REQUEST = endpoints.ResourceContainer(
 #Handwritten
 SESS_GET_REQUEST = endpoints.ResourceContainer(
     message_types.VoidMessage,
+    websafeConferenceKey=messages.StringField(1)
+)
+
+SESS_GET_REQUEST_TYPE = endpoints.ResourceContainer(
+    message_types.VoidMessage,
     websafeConferenceKey=messages.StringField(1),
-    sessionTypePath=messages.StringField(2),
-    speakerPath=messages.StringField(3)
+    sessionTypePath=messages.StringField(2)
+)
+
+SESS_GET_REQUEST_SPEAKER = endpoints.ResourceContainer(
+    message_types.VoidMessage,
+    websafeConferenceKey=messages.StringField(1),
+    speakerPath=messages.StringField(2)
 )
 
 SESS_POST_REQUEST = endpoints.ResourceContainer(
@@ -162,7 +172,7 @@ class ConferenceApi(remote.Service):
             http_method='GET', name='getConferenceSessions')
     def getConferenceSessions(self, request):
         """Return a list of sessions associated with this conference."""
-        sessions = ConferenceSession.query(ConferenceSession.conference == request.websafeConferenceKey)
+        sessions = ConferenceSession.query(ConferenceSession.websafeConferenceKey == request.websafeConferenceKey)
         if not sessions:
             raise endpoints.NotFoundException(
                 'No sessions found with key: %s' % request.websafeConferenceKey)
@@ -172,12 +182,12 @@ class ConferenceApi(remote.Service):
         )
 
     #Handwritten
-    @endpoints.method(SESS_GET_REQUEST, SessionForms,
-            path='conference/{websafeConferenceKey}/sessions/{sessionTypePath}',
+    @endpoints.method(SESS_GET_REQUEST_TYPE, SessionForms,
+            path='conference/{websafeConferenceKey}/sessions/byType/{sessionTypePath}',
             http_method='GET', name='getConferenceSessionsByType')
     def getConferenceSessionsByType(self, request):
         """Return a list of sessions associated with this conference limited by session type."""
-        sessions = ConferenceSession.query(ndb.AND(ConferenceSession.conference == request.websafeConferenceKey,
+        sessions = ConferenceSession.query(ndb.AND(ConferenceSession.websafeConferenceKey == ndb.Key(urlsafe=request.websafeConferenceKey),
                                                    ConferenceSession.typeOfSession == request.sessionType))
         if not sessions:
             raise endpoints.NotFoundException(
@@ -188,13 +198,13 @@ class ConferenceApi(remote.Service):
         )
 
     #Handwritten
-    @endpoints.method(SESS_GET_REQUEST, SessionForms,
-            path='conference/{websafeConferenceKey}/sessions/{speakerPath}',
+    @endpoints.method(SESS_GET_REQUEST_SPEAKER, SessionForms,
+            path='conference/{websafeConferenceKey}/sessions/bySpeaker/{speakerPath}',
             http_method='GET', name='getSessionsBySpeaker')
     def getSessionsBySpeaker(self, request):
         """Return a list of sessions associated with this conference limited by session speaker."""
-        sessions = ConferenceSession.query(ndb.AND(ConferenceSession.conference == request.websafeConferenceKey,
-                                                   ConferenceSession.speaker == request.speaker))
+        sessions = ConferenceSession.query(ndb.AND(ConferenceSession.websafeConferenceKey == request.websafeConferenceKey,
+                                                   ConferenceSession.speaker == request.speakerPath))
         if not sessions:
             raise endpoints.NotFoundException(
                 'No sessions found with key: %s' % request.websafeConferenceKey)
@@ -204,9 +214,9 @@ class ConferenceApi(remote.Service):
         )
 
     #Handwritten
-    @endpoints.method(SESS_POST_REQUEST, SessionForm,
+    @endpoints.method(SESS_POST_REQUEST, message_types.VoidMessage,
             path='conference/{websafeConferenceKey}/sessions',
-            http_method='PUT', name='createSession')
+            http_method='POST', name='createSession')
     def createSession(self, request):
         """Create a session."""
         return self._createSession(request)
@@ -236,17 +246,24 @@ class ConferenceApi(remote.Service):
             data['startTime'] = datetime.strptime(data['startTime'], "%H:%M").time()
         if data['date']:
             data['date'] = datetime.strptime(data['date'][:10], "%Y-%m-%d").date()
-
-        c_key = ndb.Key(ConferenceSession, request.websafeConferenceKey)
+        del data['webConfKey']
+        #c_key = ndb.Key(ConferenceSession, request.websafeConferenceKey)
+        print '1***************'
+        c_key = ndb.Key(urlsafe=request.websafeConferenceKey)
+        print '2***************'
+        if not c_key:
+            raise endpoints.BadRequestException("Conference does not exist.")
+        print '3***************'
         s_id = ConferenceSession.allocate_ids(size=1, parent=c_key)[0]
         s_key = ndb.Key(ConferenceSession, s_id, parent=c_key)
         data['key'] = s_key
-
+        print '4***************'
+        print data
         # create Conference
         ConferenceSession(**data).put()
-
+        print '5***************'
         # If we have more than 1 instance of this speaker, we add it to Memcache
-        sessions = ConferenceSession.query(ndb.AND(ConferenceSession.confWebsafeKey == request.websafeConferenceKey, ConferenceSession.speaker == data['speaker']));
+        sessions = ConferenceSession.query(ndb.AND(ConferenceSession.websafeConferenceKey == request.websafeConferenceKey, ConferenceSession.speaker == data['speaker']));
         if(sessions.count() > 1):
             featured_speakers = '%s %s %s' % (
                 'The featured speaker ',
@@ -254,7 +271,8 @@ class ConferenceApi(remote.Service):
                 ' is hosting the following sessions:'
                 ', '.join(sess.name for sess in sessions))
             memcache.set(MEMCACHE_FEATURED_SPEAKERS_KEY, featured_speakers)
-        return request
+        #return request
+        return message_types.VoidMessage()
 
 
     #Handwritten
@@ -264,11 +282,11 @@ class ConferenceApi(remote.Service):
         for field in sf.all_fields():
             if hasattr(sess, field.name):
                 # convert Date to date string; just copy others
-                if field.name.endswith('Date'):
+                if field.name.endswith('date') or field.name.endswith('Time'):
                     setattr(sf, field.name, str(getattr(sess, field.name)))
                 else:
                     setattr(sf, field.name, getattr(sess, field.name))
-            elif field.name == "conference":
+            elif field.name == "webConfKey":
                 setattr(sf, field.name, conferenceKey)
         sf.check_initialized()
         return sf
@@ -276,7 +294,7 @@ class ConferenceApi(remote.Service):
 # - - - Wishlist objects - - - - - - - - - - - - - - - - - -
     @endpoints.method(WishListForm, message_types.VoidMessage,
             path='conference/wishlist',
-            http_method='PUT', name='addSessionToWishlist')
+            http_method='POST', name='addSessionToWishlist')
     def addSessionToWishlist(self, request):
         """Add a session to a user wishlist."""
         # check auth fields
@@ -290,7 +308,7 @@ class ConferenceApi(remote.Service):
         profile = self._getProfileFromUser()
         if not profile:
             raise endpoints.BadRequestException('User does not exist')
-        profile.wishListSessions.append(request.SessionKey)
+        profile.wishListSessions.append(ndb.Key(urlsafe=request.SessionKey))
         profile.put()
         return
 
@@ -314,11 +332,11 @@ class ConferenceApi(remote.Service):
 # - - - "Other" Queries - - - - - - - - - - - - - - - - - - 
     # Grab all sessions that last below a certain threshold from a conference
     @endpoints.method(SESS_GET_DUR_REQUEST, SessionForms,
-            path='conference/{websafeConferenceKey}/sessions/{duration}',
+            path='conference/{websafeConferenceKey}/sessions/byMaxDur/{duration}',
             http_method='GET', name='getConferenceSessionsByMaxDuration')
     def getConferenceSessionsByMaxDuration(self, request):
         """Return a list of sessions associated with this conference limited by MAX duration."""
-        sessions = ConferenceSession.query(ndb.AND(ConferenceSession.conference == request.websafeConferenceKey,ConferenceSession.duration <= request.duration))
+        sessions = ConferenceSession.query(ndb.AND(ConferenceSession.websafeConferenceKey == request.websafeConferenceKey,ConferenceSession.duration <= request.duration))
         if not sessions:
             raise endpoints.NotFoundException(
                 'No sessions found with key: %s' % request.websafeConferenceKey)

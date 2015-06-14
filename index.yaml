@@ -98,9 +98,14 @@ indexes:
 - kind: ConferenceSession
   properties:
   - name: conference
-  - name: typeOfSession
+  - name: duration
 
 - kind: ConferenceSession
   properties:
   - name: conference
+  - name: typeOfSession
+
+- kind: ConferenceSession
+  properties:
+  - name: websafeConferenceKey
   - name: duration
