@@ -187,7 +187,7 @@ class ConferenceApi(remote.Service):
             http_method='GET', name='getConferenceSessionsByType')
     def getConferenceSessionsByType(self, request):
         """Return a list of sessions associated with this conference limited by session type."""
-        sessions = ConferenceSession.query(ndb.AND(ConferenceSession.websafeConferenceKey == ndb.Key(urlsafe=request.websafeConferenceKey),
+        sessions = ConferenceSession.query(ndb.AND(ConferenceSession.websafeConferenceKey == request.websafeConferenceKey,
                                                    ConferenceSession.typeOfSession == request.sessionType))
         if not sessions:
             raise endpoints.NotFoundException(
@@ -247,31 +247,21 @@ class ConferenceApi(remote.Service):
         if data['date']:
             data['date'] = datetime.strptime(data['date'][:10], "%Y-%m-%d").date()
         del data['webConfKey']
-        #c_key = ndb.Key(ConferenceSession, request.websafeConferenceKey)
-        print '1***************'
+        
         c_key = ndb.Key(urlsafe=request.websafeConferenceKey)
-        print '2***************'
         if not c_key:
             raise endpoints.BadRequestException("Conference does not exist.")
-        print '3***************'
+
         s_id = ConferenceSession.allocate_ids(size=1, parent=c_key)[0]
         s_key = ndb.Key(ConferenceSession, s_id, parent=c_key)
         data['key'] = s_key
-        print '4***************'
-        print data
+        # Add Task to discover FeaturedSpeakers, if any
+        #taskqueue.add(params={'websafeConferenceKey': request.websafeConferenceKey, 'speakerPath':data['speaker']}, url="/tasks/findFeaturedSpeakers")
+        taskqueue.add(url="/tasks/findFeaturedSpeakers/"+request.websafeConferenceKey+"/"+data['speaker'])
         # create Conference
         ConferenceSession(**data).put()
-        print '5***************'
         # If we have more than 1 instance of this speaker, we add it to Memcache
-        sessions = ConferenceSession.query(ndb.AND(ConferenceSession.websafeConferenceKey == request.websafeConferenceKey, ConferenceSession.speaker == data['speaker']));
-        if(sessions.count() > 1):
-            featured_speakers = '%s %s %s' % (
-                'The featured speaker ',
-                data['speaker'], 
-                ' is hosting the following sessions:'
-                ', '.join(sess.name for sess in sessions))
-            memcache.set(MEMCACHE_FEATURED_SPEAKERS_KEY, featured_speakers)
-        #return request
+        
         return message_types.VoidMessage()
 
 
@@ -380,7 +370,32 @@ class ConferenceApi(remote.Service):
             http_method='GET', name='getFeaturedSpeaker')
     def getFeaturedSpeaker(self, request):
         """Get the current featured speaker in memcache"""
-        return memcache.get(MEMCACHE_FEATURED_SPEAKERS_KEY);
+        return FeaturedSpeaker(FeaturedSpeaker=memcache.get(MEMCACHE_FEATURED_SPEAKERS_KEY));
+
+# - - - Task/Queue objects - - - - - - - - - - - - - - - - -
+    @endpoints.method(SESS_GET_REQUEST_SPEAKER, message_types.VoidMessage,
+            path='tasks/findFeaturedSpeakers/{websafeConferenceKey}/{speakerPath}',
+            name='findFeaturedSpeakers')
+    def findFeaturedSpeakers(self, request):
+        """Check for criteria regarding featured speakers and add them to the MEMCACHE as appropriate."""
+        sessions = ConferenceSession.query(ndb.AND(ConferenceSession.websafeConferenceKey == request.websafeConferenceKey, ConferenceSession.speaker == request.speakerPath))
+        if(sessions.count() > 1):
+            featured_speakers = '%s %s %s' % (
+                'The featured speaker ',
+                request.speakerPath, 
+                ' is hosting the following sessions:'
+                ' '.join(sess.name for sess in sessions))
+            memcache.set(MEMCACHE_FEATURED_SPEAKERS_KEY, featured_speakers)
+        return message_types.VoidMessage()
+
+    @endpoints.method(message_types.VoidMessage, message_types.VoidMessage,
+                path='tasks/kill/all',
+                name='killTaskQueue')
+    def killTaskQueue(self, request):
+        """Helper method to purge the tasks queue."""
+        q = taskqueue.Queue('default')
+        q.purge()
+        return message_types.VoidMessage()
 
 # - - - Conference objects - - - - - - - - - - - - - - - - -
 
