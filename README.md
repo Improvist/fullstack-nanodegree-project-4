@@ -16,11 +16,16 @@ Task 3 Explanation:
 	conferences. The advantage of this is viewing a quick historical display of conferences for a user.
 	QUERY PROBLEM:
 	The problem with this is that if you have a not-equals comparison, you cannot have any other property
-	filters. The simplest way around this would be to add a field to the entity that is an amalgamation of 
+	filters. From their docs: 
+		"The results are then merged, in order. A query can have no more than one not-equal filter, and a query 
+		 that has one cannot have any other inequality filters."
+	 The simplest way around this would be to add a field to the entity that in an amalgamation of 
 	"startTime" and "sessionType" - basically it is a boolean field that says "true/false" if a case meets
 	these criteria. This is a more-and-more common tradeoff of space for performance that is characterizing
 	the modern data storage. Alternatively, you could write two separate queries (one for starttime after 7
-	and one for typeofsession != workshop) and then use Python to find matches between them.
+	and one for typeofsession != workshop) and then use Python to find matches between them. For a mildly different
+	flavor, depending on your data sizes, you could query for one of the sets (start time after 7 or type of session
+	not equals to workshop) and then use python to filter out those that do not match your criteria.
 
 ##### INCLUDED SETUP INFORMATION ######
 App Engine application for the Udacity training course.

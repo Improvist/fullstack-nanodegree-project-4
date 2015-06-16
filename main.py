@@ -15,8 +15,12 @@ __author__ = 'wesc+api@google.com (Wesley Chun)'
 import webapp2
 from google.appengine.api import app_identity
 from google.appengine.api import mail
-from conference import ConferenceApi
+from google.appengine.api import memcache
+from google.appengine.ext import ndb
 
+from conference import ConferenceApi
+from conference import MEMCACHE_FEATURED_SPEAKERS_KEY
+from models import ConferenceSession
 class SetAnnouncementHandler(webapp2.RequestHandler):
     def get(self):
         """Set Announcement in Memcache."""
@@ -37,8 +41,21 @@ class SendConfirmationEmailHandler(webapp2.RequestHandler):
                 'conferenceInfo')
         )
 
+class EstablishFeaturedSpeaker(webapp2.RequestHandler):
+    def post(self):
+        """Establish if a speaker is duplicated and adds it to the Featured Speaker memcache if it is."""
+        confKey = ndb.Key(urlsafe=self.request.get('websafeConferenceKey'))
+        sessions = ConferenceSession.query(ancestor=confKey).filter(ConferenceSession.speaker == self.request.get('speaker'))
+        if(sessions.count() > 1):
+            featured_speakers = '%s %s %s' % (
+                'The featured speaker ',
+                self.request.get('speaker'), 
+                ' is hosting the following sessions:'
+                ' '.join(sess.name for sess in sessions))
+            memcache.set(MEMCACHE_FEATURED_SPEAKERS_KEY, featured_speakers)
 
 app = webapp2.WSGIApplication([
     ('/crons/set_announcement', SetAnnouncementHandler),
     ('/tasks/send_confirmation_email', SendConfirmationEmailHandler),
+    ('/tasks/establish_featured_speaker', EstablishFeaturedSpeaker)
 ], debug=True)

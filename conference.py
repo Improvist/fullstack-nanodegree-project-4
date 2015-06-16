@@ -108,6 +108,11 @@ SESS_GET_REQUEST = endpoints.ResourceContainer(
     websafeConferenceKey=messages.StringField(1)
 )
 
+SESS_GET_REQUEST_SPEAKER_ONLY = endpoints.ResourceContainer(
+    message_types.VoidMessage,
+    speakerPath=messages.StringField(1)
+)
+
 SESS_GET_REQUEST_TYPE = endpoints.ResourceContainer(
     message_types.VoidMessage,
     websafeConferenceKey=messages.StringField(1),
@@ -172,7 +177,8 @@ class ConferenceApi(remote.Service):
             http_method='GET', name='getConferenceSessions')
     def getConferenceSessions(self, request):
         """Return a list of sessions associated with this conference."""
-        sessions = ConferenceSession.query(ConferenceSession.websafeConferenceKey == request.websafeConferenceKey)
+        confKey = ndb.Key(urlsafe=request.websafeConferenceKey)
+        sessions = ConferenceSession.query(ancestor=confKey)
         if not sessions:
             raise endpoints.NotFoundException(
                 'No sessions found with key: %s' % request.websafeConferenceKey)
@@ -198,19 +204,16 @@ class ConferenceApi(remote.Service):
         )
 
     #Handwritten
-    @endpoints.method(SESS_GET_REQUEST_SPEAKER, SessionForms,
-            path='conference/{websafeConferenceKey}/sessions/bySpeaker/{speakerPath}',
+    @endpoints.method(SESS_GET_REQUEST_SPEAKER_ONLY, SessionForms,
+            path='conference/sessions/bySpeaker/{speakerPath}',
             http_method='GET', name='getSessionsBySpeaker')
     def getSessionsBySpeaker(self, request):
         """Return a list of sessions associated with this conference limited by session speaker."""
-        sessions = ConferenceSession.query(ndb.AND(ConferenceSession.websafeConferenceKey == request.websafeConferenceKey,
-                                                   ConferenceSession.speaker == request.speakerPath))
-        if not sessions:
-            raise endpoints.NotFoundException(
-                'No sessions found with key: %s' % request.websafeConferenceKey)
+        sessions = ConferenceSession.query(ConferenceSession.speaker == request.speakerPath)
+
         # return all matched Sessions as SessionForms
         return SessionForms(
-            items=[self._copySessionToForm(sess, request.websafeConferenceKey) for sess in sessions]
+            items=[self._copySessionToForm(sess, sess.websafeConferenceKey) for sess in sessions]
         )
 
     #Handwritten
@@ -223,16 +226,16 @@ class ConferenceApi(remote.Service):
 
     #Handwritten
     def _createSession(self, request):
-        """Create or update ConferenceSession object, returning ConferenceSession/request."""
+        """Create or update ConferenceSession object."""
         # check auth fields
         user = endpoints.get_current_user()
         if not user:
             raise endpoints.UnauthorizedException('Authorization required')
 
         if not request.name:
-            raise endpoints.BadRequestException("Conference 'name' field required")
+            raise endpoints.BadRequestException("Session 'name' field required")
 
-        # copy ConferenceForm/ProtoRPC Message into dict
+        # copy SessionForm/ProtoRPC Message into dict
         data = {field.name: getattr(request, field.name) for field in request.all_fields()}
         # add default values for those missing (both data model & outbound Message)
         setattr(request, "highlights", "")
@@ -255,13 +258,15 @@ class ConferenceApi(remote.Service):
         s_id = ConferenceSession.allocate_ids(size=1, parent=c_key)[0]
         s_key = ndb.Key(ConferenceSession, s_id, parent=c_key)
         data['key'] = s_key
-        # Add Task to discover FeaturedSpeakers, if any
-        #taskqueue.add(params={'websafeConferenceKey': request.websafeConferenceKey, 'speakerPath':data['speaker']}, url="/tasks/findFeaturedSpeakers")
-        taskqueue.add(url="/tasks/findFeaturedSpeakers/"+request.websafeConferenceKey+"/"+data['speaker'])
-        # create Conference
+
+        # create Session
         ConferenceSession(**data).put()
-        # If we have more than 1 instance of this speaker, we add it to Memcache
-        
+
+        # Add Task to discover FeaturedSpeakers, if any
+        taskqueue.add(params={'websafeConferenceKey': request.websafeConferenceKey,
+                                'speaker': data['speaker']},
+                       url='/tasks/establish_featured_speaker')
+
         return message_types.VoidMessage()
 
 
@@ -287,6 +292,11 @@ class ConferenceApi(remote.Service):
             http_method='POST', name='addSessionToWishlist')
     def addSessionToWishlist(self, request):
         """Add a session to a user wishlist."""
+        self._addSessionToWishlist(request)
+
+    # transactional to avoid concurrency issues with the update
+    @ndb.transactional()
+    def _addSessionToWishlist(self, request):
         # check auth fields
         user = endpoints.get_current_user()
         if not user:
@@ -341,13 +351,13 @@ class ConferenceApi(remote.Service):
             path='getConferencesAttended',
             http_method='GET', name='getConferencesAttended')
     def getConferencesAttended(self, request):
-        """Get list of conferences that user has registered for."""
+        """Get list of conferences that user has registered for that have already occurred."""
         prof = self._getProfileFromUser() # get user Profile
         conf_keys = [ndb.Key(urlsafe=wsck) for wsck in prof.conferenceKeysToAttend]
         conferences = ndb.get_multi(conf_keys)
-        #Remove conferences that have past
+        #Remove conferences that have yet to occur
         for conference in conferences:
-            if conference.startDate < date.today():
+            if conference.startDate > date.today():
                 conferences.remove(conference)
 
         # get organizers
@@ -373,21 +383,6 @@ class ConferenceApi(remote.Service):
         return FeaturedSpeaker(FeaturedSpeaker=memcache.get(MEMCACHE_FEATURED_SPEAKERS_KEY));
 
 # - - - Task/Queue objects - - - - - - - - - - - - - - - - -
-    @endpoints.method(SESS_GET_REQUEST_SPEAKER, message_types.VoidMessage,
-            path='tasks/findFeaturedSpeakers/{websafeConferenceKey}/{speakerPath}',
-            name='findFeaturedSpeakers')
-    def findFeaturedSpeakers(self, request):
-        """Check for criteria regarding featured speakers and add them to the MEMCACHE as appropriate."""
-        sessions = ConferenceSession.query(ndb.AND(ConferenceSession.websafeConferenceKey == request.websafeConferenceKey, ConferenceSession.speaker == request.speakerPath))
-        if(sessions.count() > 1):
-            featured_speakers = '%s %s %s' % (
-                'The featured speaker ',
-                request.speakerPath, 
-                ' is hosting the following sessions:'
-                ' '.join(sess.name for sess in sessions))
-            memcache.set(MEMCACHE_FEATURED_SPEAKERS_KEY, featured_speakers)
-        return message_types.VoidMessage()
-
     @endpoints.method(message_types.VoidMessage, message_types.VoidMessage,
                 path='tasks/kill/all',
                 name='killTaskQueue')
